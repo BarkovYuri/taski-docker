@@ -38,7 +38,8 @@ jobs:
           pip install flake8
 
       - name: Lint backend
-        run: flake8 backend
+        run: flake8 backend --ignore=D100,D101,D102,D104,D106
+
 
       - name: Run backend tests
         env:
