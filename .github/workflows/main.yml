@@ -131,8 +131,11 @@ jobs:
             mkdir -p ~/taski
             cd ~/taski
 
+            cat > .env <<'EOF'
+            ${{ secrets.TASKI_ENV }}
+            EOF
+
             docker compose -f docker-compose.production.yml pull
             docker compose -f docker-compose.production.yml up -d
-
             docker compose -f docker-compose.production.yml exec -T backend python manage.py migrate --noinput
             docker compose -f docker-compose.production.yml exec -T backend python manage.py collectstatic --noinput
