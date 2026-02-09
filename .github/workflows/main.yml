@@ -1,0 +1,135 @@
+name: Taski CI/CD
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_DB: taski
+          POSTGRES_USER: taski_user
+          POSTGRES_PASSWORD: taski_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U taski_user -d taski"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend deps + flake8
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install flake8
+
+      - name: Lint backend
+        run: flake8 backend
+
+      - name: Run backend tests
+        env:
+          POSTGRES_DB: taski
+          POSTGRES_USER: taski_user
+          POSTGRES_PASSWORD: taski_password
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          SECRET_KEY: test
+          DEBUG: "False"
+          ALLOWED_HOSTS: "localhost,127.0.0.1"
+        run: |
+          cd backend
+          python manage.py test
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend deps
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run frontend tests
+        run: |
+          cd frontend
+          npm test -- --watch=false
+
+  build_and_push:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: fertikylyapka/taski_backend:latest
+
+      - name: Build & push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: fertikylyapka/taski_frontend:latest
+
+      - name: Build & push gateway
+        uses: docker/build-push-action@v6
+        with:
+          context: ./nginx
+          push: true
+          tags: fertikylyapka/taski_gateway:latest
+
+  deploy:
+    needs: build_and_push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy production compose to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "docker-compose.production.yml"
+          target: "/home/${{ secrets.SSH_USER }}/taski/"
+
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -e
+            mkdir -p ~/taski
+            cd ~/taski
+
+            docker compose -f docker-compose.production.yml pull
+            docker compose -f docker-compose.production.yml up -d
+
+            docker compose -f docker-compose.production.yml exec -T backend python manage.py migrate --noinput
+            docker compose -f docker-compose.production.yml exec -T backend python manage.py collectstatic --noinput
