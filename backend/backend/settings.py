@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from django.contrib.auth.password_validation import (
     CommonPasswordValidator,
@@ -13,9 +14,9 @@ SECRET_KEY = (
     'django-insecure-j_89af+30&&4qm*8z9_(^zz8p4-ho8z_m6ylm0s$h!-p@on1_^'
 )
 
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 
 # Application definition
